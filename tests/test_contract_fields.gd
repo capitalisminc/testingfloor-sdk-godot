@@ -16,6 +16,7 @@ func test_everything_sent_uses_declared_names(check) -> void:
 	var client: TestingFloorClient = check.client(func(client: TestingFloorClient) -> void:
 		client.movement_tracking = true
 		client.app_version = "1.2.3"
+		client.build_id = "example-build"
 		client.engine_name = "Godot 4.4.1"
 		client.os_name = "macOS"
 		client.locale = "en-US"
@@ -79,7 +80,7 @@ func test_everything_sent_uses_declared_names(check) -> void:
 				for key in properties:
 					check.truthy(key in sdk_records[name], "%s field %s is declared" % [name, key])
 			else:
-				check.truthy(not name.begins_with("$"), "%s is a game or SDK event" % name)
+				check.truthy(not name.begins_with("$") or name in sdk_events, "%s is a game or SDK event" % name)
 				for key in properties:
 					var sdk_owned: bool = key.begins_with("player.") or key.begins_with("camera.") or key.begins_with("movement.") or key.begins_with("teleport.")
 					check.truthy(not sdk_owned or key in sdk_properties, "%s: SDK property %s is declared" % [name, key])

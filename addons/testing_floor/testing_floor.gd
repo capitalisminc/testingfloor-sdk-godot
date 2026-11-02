@@ -99,6 +99,9 @@ func _configure() -> void:
 		write_key = environment_key
 	endpoint = str(_setting("endpoint", endpoint)).strip_edges().trim_suffix("/")
 	enabled = bool(_setting("enabled", true))
+	collection_mode = str(_setting("collection_mode", "always"))
+	build_id = str(_setting("build_id", ""))
+	coordinate_transform = _setting("coordinate_transform", {})
 	enable_in_editor = bool(_setting("enable_in_editor", false))
 	enable_in_editor_while_recording = bool(_setting("enable_in_editor_while_recording", true))
 	movement_tracking = bool(_setting("movement_tracking", true))

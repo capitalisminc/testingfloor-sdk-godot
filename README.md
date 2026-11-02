@@ -129,3 +129,16 @@ Events are sent in batches of up to 50, every quarter second, one request at a t
 ## License
 
 MIT. See [LICENSE.md](LICENSE.md). The bundled QR encoder is MIT-licensed; see [addons/testing_floor/third_party/README.md](addons/testing_floor/third_party/README.md).
+
+
+### Build identity, collection and coordinates
+
+Set `testing_floor/build_id` to an immutable artifact ID supplied by your build pipeline. `app_version` remains the display version; reusing a display label does not make two artifacts identical. Upload the map with the same build ID.
+
+Collection defaults to `always` in built games. Set `testing_floor/collection_mode` to `recording_only` to wait for an active recording in any host. Discovery continues while waiting, and pause or lease expiry stops collection. Existing editor controls still apply.
+
+The optional `testing_floor/coordinate_transform` dictionary declares one output space for known event points, tracked objects, directions and length metrics. For example, `{ "axes": [2, -1, 3], "scale": 2.0, "offset": Vector3(10, 20, 30) }` maps native `(x,y,z)` to `(2y+10,-2x+20,2z+30)`. Axes must be a signed permutation of 1–3; scale must be positive and finite; offset must be a finite Vector3. Invalid configuration disables collection. Configuration is captured at start.
+
+Object quantization and movement thresholds use native units before conversion. Directions only permute/sign axes, and camera Euler properties are omitted when conversion is active. Arbitrary game properties pass through; the event processor runs after conversion. Map bounds and units must describe the output space. Change the build ID when that space changes.
+
+Automatic movement and teleport events use `$tf_player_moved` and `$tf_player_teleported`. Update filters that used the previous automatic names. Games may still send their own `player_moved` and `player_teleported`; public `track` rejects reserved `$tf_` names.

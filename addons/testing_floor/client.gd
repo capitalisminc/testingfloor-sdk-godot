@@ -12,7 +12,7 @@ extends Node
 ## replaced or closed. The argument is empty when no recording is attached.
 signal recording_changed(recording: Dictionary)
 
-const SDK_VERSION := "0.2.0"
+const SDK_VERSION := "0.3.0"
 const COMPLETION_RECORD := "$tf_telemetry_complete"
 const STATE_RECORD := "$tf_state"
 const OBJECTS_RECORD := "$tf_objects"
@@ -33,6 +33,11 @@ enum DeliveryState { DISABLED, NOT_CONFIGURED, OK, NETWORK_DOWN, REJECTED }
 var write_key := ""
 var endpoint := "https://dataentry.testingfloor.com"
 var enabled := true
+## Set to recording_only to collect in any host only during an active recording.
+var collection_mode := "always"
+## Optional output space: axes is a signed permutation of [1, 2, 3], scale is positive, offset is Vector3.
+var coordinate_transform := {}
+var _coordinates := {}
 ## Collect during ordinary Play in the editor, without a recording.
 var enable_in_editor := false
 ## Collect in the editor while the desktop app records it.
@@ -60,6 +65,8 @@ var movement_min_step_ortho_width := 0.005
 
 # Record context. The autoload fills these from the engine; unset values are left out.
 var app_version := ""
+## Immutable artifact identity; keep separate from the human-readable app_version.
+var build_id := ""
 var engine_name := ""
 var os_name := ""
 var locale := ""
@@ -158,7 +165,7 @@ func start(now_seconds := 0.0) -> void:
 	_objects_keyframe_at = now_seconds
 	if not enabled or is_automation:
 		delivery_state = DeliveryState.DISABLED
-	elif write_key.strip_edges().is_empty() or endpoint.strip_edges().is_empty() or not transport.is_valid():
+	elif not _configure_coordinates() or collection_mode not in ["always", "recording_only"] or write_key.strip_edges().is_empty() or endpoint.strip_edges().is_empty() or not transport.is_valid():
 		delivery_state = DeliveryState.NOT_CONFIGURED
 	else:
 		delivery_state = DeliveryState.OK
@@ -255,7 +262,7 @@ func collection_reason() -> String:
 		return "missing_configuration"
 	if delivery_state == DeliveryState.REJECTED:
 		return "collector_rejected"
-	return "editor_policy_disabled"
+	return "recording_required" if collection_mode == "recording_only" else "editor_policy_disabled"
 
 
 ## The attached recording, or an empty Dictionary while none is attached,
@@ -278,6 +285,8 @@ func pending_count() -> int:
 
 
 func _policy_permits() -> bool:
+	if collection_mode == "recording_only" and (_exposed.is_empty() or not TestingFloorRecording.has_active_lease(_exposed, _now_ms())):
+		return false
 	if not is_editor or enable_in_editor:
 		return true
 	return enable_in_editor_while_recording and not _exposed.is_empty() \
@@ -453,6 +462,10 @@ func track(event_name: String, properties: Dictionary = {}) -> bool:
 		if is_collecting():
 			dropped_events += 1
 		return false
+	return _track_gameplay(event_name, properties)
+
+
+func _track_gameplay(event_name: String, properties: Dictionary = {}) -> bool:
 	if not is_collecting() or event_name.strip_edges().is_empty():
 		return false
 	var sample := _activity()
@@ -461,6 +474,7 @@ func track(event_name: String, properties: Dictionary = {}) -> bool:
 	_merge(values, _dictionary(context_provider))
 	_merge(values, _activity_properties(sample))
 	_merge(values, properties)
+	_transform_properties(values)
 	if event_processor.is_valid():
 		var processed: Variant = event_processor.call(values)
 		if processed is Dictionary:
@@ -527,7 +541,7 @@ func _enqueue(event_name: String, properties: Dictionary, keyframe: bool, contro
 
 func _record_context() -> Dictionary:
 	var context := {"sdk_version": SDK_VERSION, "editor": is_editor}
-	for pair in [["engine", engine_name], ["os", os_name], ["locale", locale], ["app_version", app_version], ["device_model", device_model]]:
+	for pair in [["engine", engine_name], ["os", os_name], ["locale", locale], ["app_version", app_version], ["build_id", build_id], ["device_model", device_model]]:
 		if not str(pair[1]).is_empty():
 			context[pair[0]] = pair[1]
 	if screen_size.x > 0 and screen_size.y > 0:
@@ -809,9 +823,10 @@ func _object_record(group: Array[Dictionary]) -> Dictionary:
 		if row.position != null:
 			columns["sample.id"].append(row.id)
 			columns["sample.kind"].append(row.kind)
-			columns["sample.x"].append(snappedf(row.position.x, 0.01))
-			columns["sample.y"].append(snappedf(row.position.y, 0.01))
-			columns["sample.z"].append(snappedf(row.position.z, 0.01))
+			var point := _transform_point(Vector3(snappedf(row.position.x, 0.01), snappedf(row.position.y, 0.01), snappedf(row.position.z, 0.01)))
+			columns["sample.x"].append(point.x)
+			columns["sample.y"].append(point.y)
+			columns["sample.z"].append(point.z)
 		if not str(row.reason).is_empty():
 			columns["removed.id"].append(row.id)
 			columns["removed.reason"].append(row.reason)
@@ -879,7 +894,7 @@ func record_teleport(start: Variant, finish: Variant, reason := "", duration := 
 	properties["teleport.duration"] = maxf(0.0, duration)
 	if not reason.is_empty():
 		properties["teleport.reason"] = reason
-	track("player_teleported", properties)
+	_track_gameplay("$tf_player_teleported", properties)
 
 
 func _sample_movement(now: float, sample: Dictionary) -> void:
@@ -960,7 +975,7 @@ func _emit_movement(reason: String, totals: Dictionary, duration: float) -> void
 	for key in ["distance", "rotation_degrees", "fov_delta", "camera_distance", "ortho_width_delta"]:
 		if float(totals.get(key, 0.0)) > 0.0:
 			properties["movement." + key] = totals[key]
-	track("player_moved", properties)
+	_track_gameplay("$tf_player_moved", properties)
 
 
 static func _add(totals: Dictionary, step: Dictionary) -> void:
@@ -979,6 +994,56 @@ static func _angle(a: Variant, b: Variant) -> float:
 
 
 #region Values
+
+func _configure_coordinates() -> bool:
+	_coordinates = {}
+	if coordinate_transform.is_empty():
+		return true
+	var axes: Variant = coordinate_transform.get("axes", [1, 2, 3])
+	var scale: Variant = coordinate_transform.get("scale", 1.0)
+	var offset: Variant = coordinate_transform.get("offset", Vector3.ZERO)
+	if not axes is Array or axes.size() != 3 or not _number(scale) or float(scale) <= 0.0 or not offset is Vector3 or not offset.is_finite():
+		return false
+	var used := {}
+	for axis in axes:
+		if not _number(axis) or float(axis) != int(axis) or absi(int(axis)) < 1 or absi(int(axis)) > 3 or used.has(absi(int(axis))):
+			return false
+		used[absi(int(axis))] = true
+	_coordinates = {"axes": axes.duplicate(), "scale": float(scale), "offset": offset}
+	return true
+
+
+func _transform_direction(point: Vector3) -> Vector3:
+	if _coordinates.is_empty():
+		return point
+	var result := Vector3.ZERO
+	for index in 3:
+		var axis := int(_coordinates.axes[index])
+		result[index] = point[absi(axis) - 1] * (1.0 if axis > 0 else -1.0)
+	return result
+
+
+func _transform_point(point: Vector3) -> Vector3:
+	return point if _coordinates.is_empty() else _transform_direction(point) * float(_coordinates.scale) + Vector3(_coordinates.offset)
+
+
+func _transform_properties(properties: Dictionary) -> void:
+	if _coordinates.is_empty():
+		return
+	for prefix in ["player.position", "camera.position", "camera.focus", "teleport.start.position", "teleport.end.position", "camera.forward", "camera.up"]:
+		var keys := [prefix + ".x", prefix + ".y", prefix + ".z"]
+		if not keys.all(func(key: String) -> bool: return _number(properties.get(key))):
+			continue
+		var point := Vector3(properties[keys[0]], properties[keys[1]], properties[keys[2]])
+		point = _transform_direction(point) if prefix in ["camera.forward", "camera.up"] else _transform_point(point)
+		for index in 3:
+			properties[keys[index]] = point[index]
+	for key in ["movement.distance", "movement.camera_distance", "movement.ortho_width_delta", "teleport.distance", "camera.ortho_width"]:
+		if _number(properties.get(key)):
+			properties[key] = float(properties[key]) * float(_coordinates.scale)
+	for axis in ["x", "y", "z"]:
+		properties.erase("camera.euler." + axis)
+
 
 func _activity() -> Dictionary:
 	return _dictionary(activity_source)

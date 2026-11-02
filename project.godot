@@ -1,0 +1,8 @@
+; The SDK's own test project. Games copy addons/testing_floor instead.
+
+config_version=5
+
+[application]
+
+config/name="Testing Floor SDK tests"
+config/features=PackedStringArray("4.4")

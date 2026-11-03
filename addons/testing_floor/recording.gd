@@ -53,7 +53,15 @@ static func resolve(sidecar: String, launch_argument: String, editor_pid: int, n
 	if not from_sidecar.is_empty() and from_sidecar.lease_version != 0:
 		return from_sidecar
 	var from_launch := _for_editor(parse(launch_argument, now_ms), editor_pid)
-	return from_launch if not from_launch.is_empty() else from_sidecar
+	var recording := from_launch if not from_launch.is_empty() else from_sidecar
+	if recording.is_empty() or recording.lease_version != 0 or str(recording.telemetry_directory).is_empty():
+		return recording
+	var path: String = str(recording.telemetry_directory).path_join("recording-payload.json")
+	if FileAccess.file_exists(path):
+		var lease := _for_editor(parse(FileAccess.get_file_as_string(path), now_ms), editor_pid)
+		if not lease.is_empty() and lease.lease_version != 0 and lease.recording_uuid == recording.recording_uuid:
+			return lease
+	return recording
 
 
 ## The JSON after `--testing-floor=` in [param arguments], or an empty string.

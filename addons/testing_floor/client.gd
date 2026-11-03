@@ -313,6 +313,9 @@ func _refresh_recording(force: bool) -> void:
 	if poll:
 		_next_recording_poll = now + RECORDING_POLL_MS
 		candidate = recording_source.call(now) if recording_source.is_valid() else {}
+		if not candidate.is_empty() and not _recording.is_empty() and candidate.recording_uuid == _recording.recording_uuid \
+				and candidate.lease_version == 0 and _recording.lease_version != 0:
+			candidate = _recording
 		if not candidate.is_empty() and _completed.has(candidate.recording_uuid):
 			candidate = {}
 		if not candidate.is_empty() and not _recording.is_empty() and not _closed \

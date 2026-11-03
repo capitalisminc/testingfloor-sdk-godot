@@ -328,3 +328,57 @@ func test_invalid_output_space_refuses_collection(check) -> void:
 	for config in [{"axes": [1, 1, 3]}, {"scale": 0}, {"scale": INF}, {"offset": Vector3(INF, 0, 0)}]:
 		var client: TestingFloorClient = check.client(func(client: TestingFloorClient) -> void: client.coordinate_transform = config)
 		check.equal(client.is_collecting(), false, "invalid space never emits mixed coordinates")
+
+
+func test_built_game_reads_renewable_file_from_legacy_launch_directory(check) -> void:
+	var directory := ProjectSettings.globalize_path("user://built-lease-" + str(Time.get_ticks_usec()))
+	DirAccess.make_dir_recursive_absolute(directory)
+	var path := directory.path_join("recording-payload.json")
+	var launch := JSON.stringify({"recording_uuid": "example-built-recording", "telemetry_directory": directory})
+	var write := func(requested: bool, uuid: String = "example-built-recording") -> void:
+		var file := FileAccess.open(path, FileAccess.WRITE)
+		file.store_string(JSON.stringify({"recording_uuid": uuid, "telemetry_directory": directory,
+			"lease_version": 1, "telemetry_requested": requested, "lease_expires_at_unix_ms": check.now_ms + 5000}))
+		file.close()
+	var client: TestingFloorClient = check.client(func(client: TestingFloorClient) -> void:
+		client.collection_mode = "recording_only"
+		client.recording_source = func(now: int) -> Dictionary: return TestingFloorRecording.resolve("", launch, 0, now))
+	client.track_object("crate", func() -> Variant: return Vector3.ONE, "example-crate")
+	check.equal(client.is_collecting(), false, "launch metadata alone cannot enable collection")
+	write.call(true, "other-capture")
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), false, "a different capture cannot renew this launch")
+	write.call(true)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), true, "the real file activates a built game")
+	client.flush()
+	check.truthy(not check.named("$tf_objects").is_empty(), "dormant objects are sent on attachment")
+	check.now_ms += 6000
+	write.call(true)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), true, "file renewal survives the launch-time expiry")
+	write.call(false)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), false, "a fresh paused lease requests no telemetry")
+	write.call(true)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), true, "a resumed lease collects again")
+	DirAccess.remove_absolute(path)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), true, "a missing file retains only the last observed lease")
+	check.advance(client, 6000)
+	check.equal(client.is_collecting(), false, "missing file cannot revive legacy launch metadata")
+	write.call(true)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), true, "a renewed lease resumes after a missing file")
+	var closed := FileAccess.open(directory.path_join("closed.json"), FileAccess.WRITE)
+	closed.store_string(str(check.now_ms))
+	closed.close()
+	check.advance(client, 250)
+	check.advance(client, 250)
+	client.flush()
+	check.equal(client.is_collecting(), false, "closure blocks collection")
+	check.equal(check.named("$tf_telemetry_complete").size(), 1, "closure completes the Play run once")
+	for name in DirAccess.get_files_at(directory):
+		DirAccess.remove_absolute(directory.path_join(name))
+	DirAccess.remove_absolute(directory)

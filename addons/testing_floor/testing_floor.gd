@@ -99,6 +99,9 @@ func _configure() -> void:
 		write_key = environment_key
 	endpoint = str(_setting("endpoint", endpoint)).strip_edges().trim_suffix("/")
 	enabled = bool(_setting("enabled", true))
+	collection_mode = str(_setting("collection_mode", "always"))
+	build_id = str(_setting("build_id", ""))
+	coordinate_transform = _setting("coordinate_transform", {})
 	enable_in_editor = bool(_setting("enable_in_editor", false))
 	enable_in_editor_while_recording = bool(_setting("enable_in_editor_while_recording", true))
 	movement_tracking = bool(_setting("movement_tracking", true))
@@ -179,7 +182,7 @@ func _discover(now_ms: int) -> Dictionary:
 			sidecar = FileAccess.get_file_as_string(path)
 	# Play from the Godot editor runs in a separate process, so the handoff is
 	# project-scoped and editor_pid is not compared.
-	return TestingFloorRecording.resolve(sidecar, TestingFloorRecording.launch_argument(_arguments), 0, now_ms)
+	return TestingFloorRecording._resolve_with_previous(sidecar, TestingFloorRecording.launch_argument(_arguments), 0, now_ms, _recording)
 
 
 func _send(body: String, done: Callable) -> void:

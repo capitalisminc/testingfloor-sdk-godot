@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Add immutable build identity, recording-only collection in built games and an optional shared output coordinate space.
+- Namespace automatic movement and teleport events under `$tf_`; game-owned legacy names remain accepted.
+
+
 ## 0.2.0 — 2026-11-02
 
 The first release as its own SDK. Version 0.1.0 was a client built into an example game.

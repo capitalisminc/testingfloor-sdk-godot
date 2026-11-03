@@ -17,7 +17,7 @@ const MAX_LEASE_AHEAD_MS := 30000
 
 ## The handoff in [param text], or an empty Dictionary when it is malformed, has no
 ## recording UUID, or is older than 12 hours without a live lease.
-static func parse(text: String, now_ms: int) -> Dictionary:
+static func parse(text: String, now_ms: int, allow_stale: bool = false) -> Dictionary:
 	if text.strip_edges().is_empty():
 		return {}
 	var json := JSON.new()
@@ -38,7 +38,7 @@ static func parse(text: String, now_ms: int) -> Dictionary:
 		"editor_pid": _integer(value.get("editor_pid")),
 	}
 	var created := _integer(value.get("created_at_unix_ms"))
-	if created > 0 and created < now_ms - MAX_AGE_MS and not has_active_lease(recording, now_ms):
+	if not allow_stale and created > 0 and created < now_ms - MAX_AGE_MS and not has_active_lease(recording, now_ms):
 		return {}
 	return recording
 
@@ -54,12 +54,15 @@ static func resolve(sidecar: String, launch_argument: String, editor_pid: int, n
 		return from_sidecar
 	var from_launch := _for_editor(parse(launch_argument, now_ms), editor_pid)
 	var recording := from_launch if not from_launch.is_empty() else from_sidecar
-	if recording.is_empty() or recording.lease_version != 0 or str(recording.telemetry_directory).is_empty():
+	var locator := _for_editor(parse(launch_argument, now_ms, true), editor_pid)
+	if locator.is_empty():
+		locator = recording
+	if locator.is_empty() or str(locator.telemetry_directory).is_empty():
 		return recording
-	var path: String = str(recording.telemetry_directory).path_join("recording-payload.json")
+	var path: String = str(locator.telemetry_directory).path_join("recording-payload.json")
 	if FileAccess.file_exists(path):
-		var lease := _for_editor(parse(FileAccess.get_file_as_string(path), now_ms), editor_pid)
-		if not lease.is_empty() and lease.lease_version != 0 and lease.recording_uuid == recording.recording_uuid:
+		var lease := _for_editor(parse(FileAccess.get_file_as_string(path), now_ms, true), editor_pid)
+		if not lease.is_empty() and lease.lease_version != 0 and lease.recording_uuid == locator.recording_uuid:
 			return lease
 	return recording
 

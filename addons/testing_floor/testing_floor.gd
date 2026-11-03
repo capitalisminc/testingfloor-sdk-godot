@@ -182,7 +182,7 @@ func _discover(now_ms: int) -> Dictionary:
 			sidecar = FileAccess.get_file_as_string(path)
 	# Play from the Godot editor runs in a separate process, so the handoff is
 	# project-scoped and editor_pid is not compared.
-	return TestingFloorRecording.resolve(sidecar, TestingFloorRecording.launch_argument(_arguments), 0, now_ms)
+	return TestingFloorRecording._resolve_with_previous(sidecar, TestingFloorRecording.launch_argument(_arguments), 0, now_ms, _recording)
 
 
 func _send(body: String, done: Callable) -> void:

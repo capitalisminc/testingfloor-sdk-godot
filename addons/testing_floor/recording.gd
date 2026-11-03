@@ -49,6 +49,10 @@ static func parse(text: String, now_ms: int, allow_stale: bool = false) -> Dicti
 ## over a sidecar without a lease. In an editor ([param editor_pid] is not 0), a
 ## handoff that names another editor's process is ignored from either source.
 static func resolve(sidecar: String, launch_argument: String, editor_pid: int, now_ms: int) -> Dictionary:
+	return _resolve_with_previous(sidecar, launch_argument, editor_pid, now_ms, {})
+
+
+static func _resolve_with_previous(sidecar: String, launch_argument: String, editor_pid: int, now_ms: int, previous: Dictionary) -> Dictionary:
 	var from_sidecar := _for_editor(parse(sidecar, now_ms), editor_pid)
 	if not from_sidecar.is_empty() and from_sidecar.lease_version != 0:
 		return from_sidecar
@@ -64,6 +68,9 @@ static func resolve(sidecar: String, launch_argument: String, editor_pid: int, n
 		var lease := _for_editor(parse(FileAccess.get_file_as_string(path), now_ms, true), editor_pid)
 		if not lease.is_empty() and lease.lease_version != 0 and lease.recording_uuid == locator.recording_uuid:
 			return lease
+	if not previous.is_empty() and previous.lease_version != 0 and previous.recording_uuid == locator.recording_uuid \
+			and previous.telemetry_directory == locator.telemetry_directory:
+		return previous
 	return recording
 
 

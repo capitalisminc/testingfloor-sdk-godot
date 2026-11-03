@@ -350,7 +350,7 @@ func _built_game_file_lifecycle(check, launch_lease_version: int) -> void:
 		file.close()
 	var client: TestingFloorClient = check.client(func(client: TestingFloorClient) -> void:
 		client.collection_mode = "recording_only"
-		client.recording_source = func(now: int) -> Dictionary: return TestingFloorRecording.resolve("", launch, 0, now))
+		client.recording_source = func(now: int) -> Dictionary: return TestingFloorRecording._resolve_with_previous("", launch, 0, now, client._recording))
 	client.track_object("crate", func() -> Variant: return Vector3.ONE, "example-crate")
 	check.equal(client.is_collecting(), launch_lease_version == 1, "only a live versioned launch initially collects")
 	write.call(true, "other-capture")
@@ -361,6 +361,20 @@ func _built_game_file_lifecycle(check, launch_lease_version: int) -> void:
 	check.equal(client.is_collecting(), true, "the real file activates a built game")
 	client.flush()
 	check.truthy(not check.named("$tf_objects").is_empty(), "dormant objects are sent on attachment")
+	write.call(false)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), false, "file pause stops collection")
+	DirAccess.remove_absolute(path)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), false, "a still-live static launch cannot override a file pause")
+	write.call(true)
+	check.advance(client, 250)
+	check.now_ms += 6000
+	write.call(true)
+	check.advance(client, 250)
+	DirAccess.remove_absolute(path)
+	check.advance(client, 250)
+	check.equal(client.is_collecting(), true, "an older static launch expiry cannot shorten a renewed file lease")
 	check.now_ms += 13 * 60 * 60 * 1000
 	write.call(true)
 	check.advance(client, 250)
